@@ -1,0 +1,10 @@
+[project]
+name = "shoot-the-box"
+version = "1.0.0"
+description = "A basic 2D shooting game using pygame"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pygame>=2.6.1",
+]
+license = "MIT"
