@@ -20,10 +20,12 @@ BULLET_OFFSET_Y = 18
 BOX_MIN_X = 300
 BOX_SIZE = 48
 BULLET_OFFSCREEN_OFFSET = 100
+NUM_BOXES = 3
+BOX_SPEED = 3
+DIRECTION_CHANGE_INTERVAL = 2  # seconds
 Hit = 0
 Bullets_Fired = 0
 Bullets_Resolved = 0
-Box_Rect = None
 Space_Pressed = False
 
 class Player(sprite.Sprite):
@@ -65,17 +67,48 @@ class Bullet(sprite.Sprite):
         self.rect = self.image.get_rect(center=(pos_x + BULLET_OFFSET_X, pos_y + BULLET_OFFSET_Y))
 
     def update(self):
-        global Hit, Bullets_Fired, Bullets_Resolved, Box_Rect
+        global Hit, Bullets_Fired, Bullets_Resolved
         self.rect.x += 15
-        if Box_Rect and self.rect.colliderect(Box_Rect):
-            Hit += 1
-            Bullets_Resolved += 1
-            Box_Rect.x = random.randint(BOX_MIN_X, SCREEN_WIDTH - BOX_SIZE)
-            Box_Rect.y = random.randint(0, SCREEN_HEIGHT - BOX_SIZE)
-            self.kill()
+        for box in boxes:
+            if self.rect.colliderect(box.rect):
+                Hit += 1
+                Bullets_Resolved += 1
+                box.reset_position()
+                self.kill()
+                break
         if self.rect.x >= SCREEN_WIDTH + self.rect.size[X_IDX]:
             Bullets_Resolved += 1
             self.kill()
+
+class Box(sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.image = image.load("./assets/Box.png")
+        self.rect = self.image.get_rect()
+        self.reset_position()
+        self.velocity = [random.choice([-BOX_SPEED, BOX_SPEED]), random.choice([-BOX_SPEED, BOX_SPEED])]
+        self.last_direction_change = time.get_ticks()
+
+    def reset_position(self):
+        self.rect.x = random.randint(BOX_MIN_X, SCREEN_WIDTH - BOX_SIZE)
+        self.rect.y = random.randint(0, SCREEN_HEIGHT - BOX_SIZE)
+
+    def update(self):
+        # Move box
+        self.rect.x += self.velocity[X_IDX]
+        self.rect.y += self.velocity[Y_IDX]
+
+        # Bounce off screen edges
+        if self.rect.left < BOX_MIN_X or self.rect.right > SCREEN_WIDTH:
+            self.velocity[X_IDX] = -self.velocity[X_IDX]
+        if self.rect.top < 0 or self.rect.bottom > SCREEN_HEIGHT:
+            self.velocity[Y_IDX] = -self.velocity[Y_IDX]
+
+        # Periodically change direction
+        current_time = time.get_ticks()
+        if (current_time - self.last_direction_change) / 1000 > DIRECTION_CHANGE_INTERVAL:
+            self.velocity = [random.choice([-BOX_SPEED, BOX_SPEED]), random.choice([-BOX_SPEED, BOX_SPEED])]
+            self.last_direction_change = current_time
 
 def shoot(bullet_sound, player, bullet_group):
     global Bullets_Fired
@@ -84,7 +117,7 @@ def shoot(bullet_sound, player, bullet_group):
     bullet_sound.play()
 
 async def main():
-    global Hit, Bullets_Fired, Bullets_Resolved, Box_Rect, Space_Pressed
+    global Hit, Bullets_Fired, Bullets_Resolved, Space_Pressed
     # Initialize pygame
     pygame.init()
     running = True
@@ -93,9 +126,6 @@ async def main():
     display.set_caption("SHOOT THE BOX")
     clock = time.Clock()
     mouse.set_visible(False)
-    Box_image = image.load("./assets/Box.png")
-    Box_Rect = Box_image.get_rect()
-    Box_Rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
 
     # Music and sound effects
     bullet_sound = mixer.Sound("./assets/BS2.mp3")
@@ -109,7 +139,7 @@ async def main():
     def show_score():
         acc = 100 if Bullets_Resolved == 0 else round((Hit / Bullets_Resolved) * 100, 2)
         score = Rim_font.render(
-            f"Hits: {Hit}  Accuracy: {acc}%",
+            f"Hits: {Hit}  Accuracy: {acc}%  Targets: {NUM_BOXES}",
             True,
             (255, 20, 20),
             None,
@@ -122,12 +152,15 @@ async def main():
     player_group.add(player)
 
     bullet_group = sprite.Group()
+    box_group = sprite.Group()
+    global boxes
+    boxes = [Box() for _ in range(NUM_BOXES)]
+    box_group.add(boxes)
 
     while running:
         for eve in event.get():
             if eve.type == pygame.QUIT:
                 running = False
-
             if eve.type == pygame.MOUSEBUTTONDOWN:
                 shoot(bullet_sound, player, bullet_group)
 
@@ -142,11 +175,12 @@ async def main():
 
         screen.fill((255, 255, 255))
         draw.circle(screen, (0, 255, 0), (PLAY_CIRCLE_CENTER_X, PLAY_CIRCLE_CENTER_Y), PLAY_CIRCLE_RADIUS, 1000, False, False, False, False)
-        screen.blit(Box_image, Box_Rect)
+        box_group.draw(screen)
         player_group.draw(screen)
         bullet_group.draw(screen)
         bullet_group.update()
         player_group.update()
+        box_group.update()
         show_score()
         display.update()
         clock.tick(GAME_SPEED)
