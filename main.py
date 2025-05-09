@@ -1,119 +1,161 @@
-import pygame, sys, random
+import asyncio
+import platform
+import pygame
+import random
+import math
+from pygame import image, sprite, mouse, event, display, font, time, mixer, draw
 
-Hit = 1
-BFired = 1
+X_IDX = 0
+Y_IDX = 1
+WIDTH_IDX = X_IDX
+HEIGHT_IDX = Y_IDX
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
+GAME_SPEED = 60
+PLAY_CIRCLE_RADIUS = 324
+PLAY_CIRCLE_CENTER_X = 0
+PLAY_CIRCLE_CENTER_Y = 300
+BULLET_OFFSET_X = 70
+BULLET_OFFSET_Y = 18
+BOX_MIN_X = 300
+BOX_SIZE = 48
+BULLET_OFFSCREEN_OFFSET = 100
+Hit = 0
+Bullets_Fired = 0
+Bullets_Resolved = 0
+Box_Rect = None
+Space_Pressed = False
 
-
-class Player(pygame.sprite.Sprite):
+class Player(sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.image = pygame.image.load(
-            "./assets/Gun.png"
-        )
-
-        self.rect = self.image.get_rect(center=(screen_width / 2, screen_height / 2))
+        self.image = image.load("./assets/Gun.png")
+        self.rect = self.image.get_rect()
 
     def update(self):
-        if (284, 0) > pygame.mouse.get_pos():
-            self.rect.center = pygame.mouse.get_pos()
+        mouse_pos = mouse.get_pos()
+        circle_center = (PLAY_CIRCLE_CENTER_X, PLAY_CIRCLE_CENTER_Y)
+        radius = PLAY_CIRCLE_RADIUS
+
+        # Calculate distance from mouse to circle center
+        dx = mouse_pos[X_IDX] - circle_center[X_IDX]
+        dy = mouse_pos[Y_IDX] - circle_center[Y_IDX]
+        distance = math.sqrt(dx**2 + dy**2)
+
+        if distance <= radius:
+            # If mouse is inside the circle, move player to mouse position
+            self.rect.center = mouse_pos
+        else:
+            # If mouse is outside, clamp position to the circle's edge
+            # Normalize the direction vector and scale by radius
+            if distance > 0:  # Avoid division by zero
+                dx /= distance
+                dy /= distance
+                clamped_x = circle_center[X_IDX] + dx * radius
+                clamped_y = circle_center[Y_IDX] + dy * radius
+                self.rect.center = (clamped_x, clamped_y)
 
     def create_bullet(self):
-        return Bullet(pygame.mouse.get_pos()[0], pygame.mouse.get_pos()[1])
+        return Bullet(self.rect.x, self.rect.y)
 
-
-class Bullet(pygame.sprite.Sprite):
+class Bullet(sprite.Sprite):
     def __init__(self, pos_x, pos_y):
         super().__init__()
-        self.image = pygame.image.load(
-            "./assets/Bullet.png"
-        )
-        self.rect = self.image.get_rect(center=(pos_x + 35, pos_y - 13))
+        self.image = image.load("./assets/Bullet.png")
+        self.rect = self.image.get_rect(center=(pos_x + BULLET_OFFSET_X, pos_y + BULLET_OFFSET_Y))
 
     def update(self):
-        global Hit
+        global Hit, Bullets_Fired, Bullets_Resolved, Box_Rect
         self.rect.x += 15
-        if self.rect.colliderect(box_rect):
+        if Box_Rect and self.rect.colliderect(Box_Rect):
             Hit += 1
-            box_rect.x = random.randint(300, screen_width - 48)
-            box_rect.y = random.randint(0, screen_height - 48)
+            Bullets_Resolved += 1
+            Box_Rect.x = random.randint(BOX_MIN_X, SCREEN_WIDTH - BOX_SIZE)
+            Box_Rect.y = random.randint(0, SCREEN_HEIGHT - BOX_SIZE)
             self.kill()
-        if self.rect.x >= screen_width + 100:
+        if self.rect.x >= SCREEN_WIDTH + self.rect.size[X_IDX]:
+            Bullets_Resolved += 1
             self.kill()
 
+def shoot(bullet_sound, player, bullet_group):
+    global Bullets_Fired
+    Bullets_Fired += 1
+    bullet_group.add(player.create_bullet())
+    bullet_sound.play()
 
-# initialize pygame
-pygame.init()
+async def main():
+    global Hit, Bullets_Fired, Bullets_Resolved, Box_Rect, Space_Pressed
+    # Initialize pygame
+    pygame.init()
+    running = True
 
+    screen = display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    display.set_caption("SHOOT THE BOX")
+    clock = time.Clock()
+    mouse.set_visible(False)
+    Box_image = image.load("./assets/Box.png")
+    Box_Rect = Box_image.get_rect()
+    Box_Rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
 
-# Basic code
-screen_width = 800
-screen_height = 600
-screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("SHOOT THE BOX")
-clock = pygame.time.Clock()
-pygame.mouse.set_visible(False)
-Box_image = pygame.image.load(
-    "./assets/Box.png"
-)
-box_rect = Box_image.get_rect()
-box_rect.center = (screen_width // 2, screen_height // 2)
+    # Music and sound effects
+    bullet_sound = mixer.Sound("./assets/BS2.mp3")
+    mixer.music.load("./assets/SH.mp3")
+    mixer.music.set_volume(0.8)
+    mixer.music.play(-1, 0.0, 1000)
 
+    # Text
+    Rim_font = font.Font("./assets/rim.otf", 20)
 
-# Music and sound effects
-sound_1 = pygame.mixer.Sound(
-    "./assets/BS2.mp3"
-)
-pygame.mixer.music.load("./assets/SH.mp3")
-pygame.mixer.music.play(-1, 0.0)
+    def show_score():
+        acc = 100 if Bullets_Resolved == 0 else round((Hit / Bullets_Resolved) * 100, 2)
+        score = Rim_font.render(
+            f"Hits: {Hit}  Accuracy: {acc}%",
+            True,
+            (255, 20, 20),
+            None,
+        )
+        score_rect = score.get_rect()
+        screen.blit(score, score_rect)
 
+    player = Player()
+    player_group = sprite.Group()
+    player_group.add(player)
 
-# Text
-font = pygame.font.Font("./assets/rim.otf", 20)
+    bullet_group = sprite.Group()
 
+    while running:
+        for eve in event.get():
+            if eve.type == pygame.QUIT:
+                running = False
 
-def show_score():
-    score = font.render(
-        "Hits: "
-        + str(Hit - 1)
-        + "  Accuracy: "
-        + str(round((Hit / BFired) * 100, 2))
-        + "%",
-        True,
-        (255, 0, 0),
-        None,
-    )
-    score_rect = score.get_rect()
-    screen.blit(score, score_rect)
+            if eve.type == pygame.MOUSEBUTTONDOWN:
+                shoot(bullet_sound, player, bullet_group)
 
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_q]:
+            running = False
+        elif keys[pygame.K_SPACE] and not Space_Pressed:
+            Space_Pressed = True
+            shoot(bullet_sound, player, bullet_group)
+        elif not keys[pygame.K_SPACE]:
+            Space_Pressed = False
 
-player = Player()
-player_group = pygame.sprite.Group()
-player_group.add(player)
+        screen.fill((255, 255, 255))
+        draw.circle(screen, (0, 255, 0), (PLAY_CIRCLE_CENTER_X, PLAY_CIRCLE_CENTER_Y), PLAY_CIRCLE_RADIUS, 1000, False, False, False, False)
+        screen.blit(Box_image, Box_Rect)
+        player_group.draw(screen)
+        bullet_group.draw(screen)
+        bullet_group.update()
+        player_group.update()
+        show_score()
+        display.update()
+        clock.tick(GAME_SPEED)
+        await asyncio.sleep(1.0 / GAME_SPEED)
 
-bullet_group = pygame.sprite.Group()
+    pygame.quit()
 
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            # deactivates the pygame library
-            pygame.quit()
-            sys.exit()
-            
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if (284, 0) > pygame.mouse.get_pos():
-                BFired += 1
-                bullet_group.add(player.create_bullet())
-                sound_1.play()
-
-    screen.fill((255, 255, 255))
-    pygame.draw.circle(
-        screen, (0, 255, 0), (0, 300), 324, 1000, False, False, False, False
-    )
-    screen.blit(Box_image, box_rect)
-    player_group.draw(screen)
-    bullet_group.draw(screen)
-    bullet_group.update()
-    player_group.update()
-    show_score()
-    pygame.display.update()
-    clock.tick(60)
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(main())
