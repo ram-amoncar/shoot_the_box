@@ -27,6 +27,8 @@ Hit = 0
 Bullets_Fired = 0
 Bullets_Resolved = 0
 Space_Pressed = False
+Streak = 0
+Score = 0
 
 class Player(sprite.Sprite):
     def __init__(self):
@@ -67,17 +69,24 @@ class Bullet(sprite.Sprite):
         self.rect = self.image.get_rect(center=(pos_x + BULLET_OFFSET_X, pos_y + BULLET_OFFSET_Y))
 
     def update(self):
-        global Hit, Bullets_Fired, Bullets_Resolved
+        global Hit, Bullets_Fired, Bullets_Resolved, Streak, Score
         self.rect.x += 15
         for box in boxes:
             if self.rect.colliderect(box.rect):
                 Hit += 1
+                Streak += 1
+                # Base points: 10 per hit
+                # Bonus points: 5 * (streak - 2) for streaks >= 3
+                Score += 10
+                if Streak >= 3:
+                    Score += 5 * (Streak - 2)
                 Bullets_Resolved += 1
                 box.reset_position()
                 self.kill()
                 break
         if self.rect.x >= SCREEN_WIDTH + self.rect.size[X_IDX]:
             Bullets_Resolved += 1
+            Streak = 0  # Reset streak on miss
             self.kill()
 
 class Box(sprite.Sprite):
@@ -117,7 +126,7 @@ def shoot(bullet_sound, player, bullet_group):
     bullet_sound.play()
 
 async def main():
-    global Hit, Bullets_Fired, Bullets_Resolved, Space_Pressed
+    global Hit, Bullets_Fired, Bullets_Resolved, Space_Pressed, Streak, Score
     # Initialize pygame
     pygame.init()
     running = True
@@ -139,9 +148,9 @@ async def main():
     def show_score():
         acc = 100 if Bullets_Resolved == 0 else round((Hit / Bullets_Resolved) * 100, 2)
         score = Rim_font.render(
-            f"Hits: {Hit}  Accuracy: {acc}%  Targets: {NUM_BOXES}",
+            f"Score: {Score}  Hits: {Hit}  Accuracy: {acc}%  Streak: {Streak}",
             True,
-            (255, 20, 20),
+            (0, 0, 0),
             None,
         )
         score_rect = score.get_rect()
